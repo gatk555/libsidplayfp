@@ -73,6 +73,10 @@ if HARDSID
   noinst_LTLIBRARIES += src/builders/hardsid-builder/libsidplayfp-hardsid.la
 endif
 
+if SWINSIDSIM
+  noinst_LTLIBRARIES += src/builders/swinsidsim-builder/libsidplayfp-swinsidsim.la
+endif
+
 if EXSID_SUPPORT
   noinst_LTLIBRARIES += src/builders/exsid-builder/libsidplayfp-exsid.la
 endif
@@ -214,6 +218,10 @@ src_libsidplayfp_la_CPPFLAGS = $(LIBGCRYPT_CFLAGS) $(PTHREAD_CFLAGS) $(AM_CPPFLA
 
 if HARDSID
   src_libsidplayfp_la_LIBADD += src/builders/hardsid-builder/libsidplayfp-hardsid.la
+endif
+
+if SWINSIDSIM
+  src_libsidplayfp_la_LIBADD += src/builders/swinsidsim-builder/libsidplayfp-swinsidsim.la
 endif
 
 if EXSID_SUPPORT
@@ -362,6 +370,21 @@ src_builders_hardsid_builder_libsidplayfp_hardsid_la_SOURCES = \
 $(hardsid_src) \
 src/builders/hardsid-builder/hardsid-builder.cpp  \
 src/builders/hardsid-builder/hardsid-emu.h
+endif
+
+if SWINSIDSIM
+src_builders_swinsidsim_builder_libsidplayfp_swinsidsim_ladir = $(includedir)/sidplayfp/builders
+src_builders_swinsidsim_builder_libsidplayfp_swinsidsim_la_HEADERS = \
+src/builders/swinsidsim-builder/swinsidsim.h
+
+src_builders_swinsidsim_builder_libsidplayfp_swinsidsim_la_SOURCES = \
+src/builders/swinsidsim-builder/swinsidsim-emu.cpp \
+src/builders/swinsidsim-builder/swinsidsim-builder.cpp  \
+src/builders/swinsidsim-builder/swinsidsim-emu.h
+
+src_builders_swinsidsim_builder_libsidplayfp_swinsidsim_la_LIBADD = \
+    $(SIMAVR_LIBS)
+
 endif
 
 

@@ -137,6 +137,22 @@ AC_ARG_ENABLE([hardsid],
 
 AM_CONDITIONAL([HARDSID], [test "x$enable_hardsid" = "xyes"])
 
+AC_ARG_ENABLE([swinsidsim],
+  AS_HELP_STRING([--enable-swinsidsim],[enable swinsid simulator builder [default=no]])
+)
+
+AM_CONDITIONAL([SWINSIDSIM], [test "x$enable_swinsidsim" = "xyes"])
+
+# SwinSIDsim support requires libsimavr
+AS_IF(
+    [test "x$enable_swinsidsim" != "xno"],
+    [PKG_CHECK_MODULES([SIMAVR],
+        [simavr >= v1.7],
+        [AC_DEFINE([HAVE_SIMAVR], 1, [Define to 1 if you have libsimavr (-lsimavr).])
+        build_swinsidsim_builder=yes]
+    )]
+)
+
 
 AC_ARG_ENABLE([inline],
   AS_HELP_STRING([--enable-inline],[enable inlining of functions [default=yes]])
