@@ -120,7 +120,7 @@ SwinSIDsim::SwinSIDsim(sidbuilder *builder, const std::string &fw_filename) :
     ocr1bl_irq=avr_iomem_getirq(swinsid_avrsim,OCR1BL,NULL,AVR_IOMEM_IRQ_ALL);
     avr_irq_register_notify(ocr1bl_irq,&ocr1bl_write_notify,this);
 
-    cout << "Determine samplerate\n";
+//    cout << "Determine samplerate\n";
     /* Wait for a sample */
     int state = cpu_Running;
     while ((state != cpu_Done) && (state != cpu_Crashed) && !m_sample_generated)
@@ -140,7 +140,7 @@ SwinSIDsim::SwinSIDsim(sidbuilder *builder, const std::string &fw_filename) :
         state = avr_run(swinsid_avrsim);
     cycles = swinsid_avrsim->cycle - cycles;
     m_sample_rate = swinsid_avrsim->frequency / cycles;
-    cout << "SwinSID samplerate: " << m_sample_rate << endl;
+//    cout << "SwinSID samplerate: " << m_sample_rate << endl;
 
     m_sample_generated = false;
 
