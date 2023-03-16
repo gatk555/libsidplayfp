@@ -303,16 +303,17 @@ void SwinSIDsim::voice(unsigned int num, bool mute) {
 // Set the emulated SID model
 void SwinSIDsim::model(SidConfig::sid_model_t model, bool digiboost)
 {
-//    reSIDfp::ChipModel chipModel;
+    avr_irq_t *pin_irq;
+
     switch (model)
     {
         case SidConfig::MOS6581:
-//            chipModel = reSIDfp::MOS6581;
-//            m_sid.input(0);
+            pin_irq=avr_io_getirq(swinsid_avrsim,AVR_IOCTL_IOPORT_GETIRQ('B'),0);
+            avr_raise_irq(pin_irq,0);
             break;
         case SidConfig::MOS8580:
-//            chipModel = reSIDfp::MOS8580;
-//            m_sid.input(digiboost ? -32768 : 0);
+            pin_irq=avr_io_getirq(swinsid_avrsim,AVR_IOCTL_IOPORT_GETIRQ('B'),0);
+            avr_raise_irq(pin_irq,1);
             break;
         default:
             m_status = false;
@@ -320,7 +321,6 @@ void SwinSIDsim::model(SidConfig::sid_model_t model, bool digiboost)
             return;
     }
 
-//    m_sid.setChipModel(chipModel);
     m_status = true;
 }
 
