@@ -87,7 +87,7 @@ public:
     void sampling(float systemclock, float freq,
         SidConfig::sampling_method_t method, bool) override;
 
-    void voice(unsigned int num, bool mute) override;
+    void voice(unsigned int num, bool mute);
 
     void model(SidConfig::sid_model_t model, bool digiboost) override;
 

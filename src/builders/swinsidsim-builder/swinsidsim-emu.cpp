@@ -171,6 +171,7 @@ uint8_t SwinSIDsim::read(uint_least8_t addr)
 {
     clock();
 //    return m_sid.read(addr);
+    return 0;
 }
 
 void SwinSIDsim::write(uint_least8_t addr, uint8_t data)
