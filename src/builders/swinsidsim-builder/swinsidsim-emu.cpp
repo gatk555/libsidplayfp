@@ -55,6 +55,7 @@ using std::cout, std::endl;
 
 namespace libsidplayfp
 {
+static void avr_sleep(avr_t *avr, unsigned long int how_long);
 
 void SwinSIDsim::ocr1bl_write_notify(struct avr_irq_t * irq, uint32_t value, void * param) {
     libsidplayfp::SwinSIDsim *sidemu = (libsidplayfp::SwinSIDsim *) param;
@@ -63,7 +64,7 @@ void SwinSIDsim::ocr1bl_write_notify(struct avr_irq_t * irq, uint32_t value, voi
     sidemu->m_bufferpos++;
 
     sidemu->m_sample_generated = true;
-//<>printf("OCR1BL written, sample %d\n",sample);
+//    printf("OCR1BL written, sample %d\n", sidemu->m_sample);
 //    output_buffer[output_idx]=sample;
 //    output_idx++;
 //    if (output_idx==4096) {
@@ -93,19 +94,37 @@ const char* SwinSIDsim::getCredits()
     return credits.c_str();
 }
 
+void SwinSIDsim::wait_for_sample(void)
+{
+    int state;
+
+    do {
+        state = avr_run(swinsid_avrsim);
+    } while ((state != cpu_Done) && (state != cpu_Crashed) &&
+	     !m_sample_generated);
+    m_sample_generated = false;
+}
+
 SwinSIDsim::SwinSIDsim(sidbuilder *builder, const std::string &fw_filename) :
     swinsid_fw(*new elf_firmware_t),
     swinsid_avrsim(NULL),
     sidemu(builder),
     m_sync_avr_c64_clock(0)
 {
+    avr_irq_t         *ocr1bl_irq;
+    avr_cycle_count_t  cycles;
+
     m_buffer = new short[OUTPUTBUFFERSIZE];
     m_sample = 0;
     m_sample_generated = false;
+
     cout << "SwinSID loading firmware\n";
+
     swinsid_fw = {{0}};
     elf_read_firmware(fw_filename.c_str(), &swinsid_fw);
+
     cout << "Creating MCU\n";
+
     swinsid_avrsim = avr_make_mcu_by_name(swinsid_fw.mmcu);
     if (!swinsid_avrsim) {
         static char msg[256];
@@ -114,41 +133,43 @@ SwinSIDsim::SwinSIDsim(sidbuilder *builder, const std::string &fw_filename) :
     }
     avr_init(swinsid_avrsim);
     avr_load_firmware(swinsid_avrsim, &swinsid_fw);
-//    reset(0);
+    portc_irq = avr_io_getirq(swinsid_avrsim,
+			      AVR_IOCTL_IOPORT_GETIRQ('C'),
+			      IOPORT_IRQ_PIN_ALL_IN);
+    portd_irq = avr_io_getirq(swinsid_avrsim,
+			      AVR_IOCTL_IOPORT_GETIRQ('D'),
+			      IOPORT_IRQ_PIN_ALL_IN);
 
-    avr_irq_t *ocr1bl_irq;
-    ocr1bl_irq=avr_iomem_getirq(swinsid_avrsim,OCR1BL,NULL,AVR_IOMEM_IRQ_ALL);
-    avr_irq_register_notify(ocr1bl_irq,&ocr1bl_write_notify,this);
+    ocr1bl_irq = avr_iomem_getirq(swinsid_avrsim,
+				  OCR1BL, NULL, AVR_IOMEM_IRQ_ALL);
+    avr_irq_register_notify(ocr1bl_irq, &ocr1bl_write_notify, this);
 
-//    cout << "Determine samplerate\n";
-    /* Wait for a sample */
-    int state = cpu_Running;
-    while ((state != cpu_Done) && (state != cpu_Crashed) && !m_sample_generated)
-        state = avr_run(swinsid_avrsim);
-    m_sample_generated = false;
+    /* Increase the instruction burst. */
 
-    /* We need to wait for another sample before we start the measurement, because the first timer
-       cycle, it is influenced by the initialized value inside the timer register, which results in
-       one AVR cycle less. */
-    while ((state != cpu_Done) && (state != cpu_Crashed) && !m_sample_generated)
-        state = avr_run(swinsid_avrsim);
+    swinsid_avrsim->run_cycle_limit = 100;
+    swinsid_avrsim->sleep = avr_sleep;
+
+    /* Determine samplerate. */
+
+    wait_for_sample();
+
+    /* We need to wait for another sample before we start the measurement,
+     * because the first timer cycle is influenced by the initialized value
+     * inside the timer register, which results in one AVR cycle less.
+     */
+
+    wait_for_sample();
 
     /* Now we can start the measurement */
-    avr_cycle_count_t cycles = swinsid_avrsim->cycle;
+
+    cycles = swinsid_avrsim->cycle;
     m_sample_generated = false;
-    while ((state != cpu_Done) && (state != cpu_Crashed) && !m_sample_generated)
-        state = avr_run(swinsid_avrsim);
+    wait_for_sample();
     cycles = swinsid_avrsim->cycle - cycles;
     m_sample_rate = swinsid_avrsim->frequency / cycles;
-//    cout << "SwinSID samplerate: " << m_sample_rate << endl;
+    cout << "SwinSID samplerate: " << m_sample_rate << endl;
 
     m_sample_generated = false;
-
-    /* Find the external interrupt INT0 vector in the table of interrupt vectors */
-    for (int i=0; i<swinsid_avrsim->interrupts.vector_count; i++ ) {
-      if (swinsid_avrsim->interrupts.vector[i]->vector == 1)
-        m_int0_interrupt_vector = swinsid_avrsim->interrupts.vector[i];
-    }
 }
 
 SwinSIDsim::~SwinSIDsim()
@@ -171,87 +192,50 @@ uint8_t SwinSIDsim::read(uint_least8_t addr)
 {
     clock();
 //    return m_sid.read(addr);
+    return 0;
 }
 
 void SwinSIDsim::write(uint_least8_t addr, uint8_t data)
 {
     avr_irq_t *pin_irq;
+    uint8_t portc, portd;
 
     clock();
+    portc = addr | ((data & 4) << 3);  /* Move D2 to PC5 */
+    avr_raise_irq(portc_irq, portc);
+    portd = data & 0xfb;               /* CS line on PD2 goes low */
+    avr_raise_irq(portd_irq, portd);
+    portd = data | 4;                  /* CS line on PD2 goes high */
+    avr_raise_irq(portd_irq, portd);
+}
 
+static void avr_sleep(avr_t *avr, unsigned long int how_long)
+{
 #if 0
-    /* This sets the IO pins of the SwinSID using the irq mechanism in
-       SimAVR. It is the cleanest way to do it, since using the irq
-       mechanism, all on-chip AVR pheripherals can react to the pin changes.
-       Unfortunately, doing it this way, is also very slow.
+  static unsigned long int total_sleep;
+  static unsigned int     calls;
 
-       Therefore this method is not used.
-     */
-
-    /* Output the register address on pin PC0..PC4 of the Atmega88 */
-    pin_irq=avr_io_getirq(swinsid_avrsim,AVR_IOCTL_IOPORT_GETIRQ('C'),0);
-    avr_raise_irq(pin_irq,addr & 1 ? 1 : 0);
-    pin_irq=avr_io_getirq(swinsid_avrsim,AVR_IOCTL_IOPORT_GETIRQ('C'),1);
-    avr_raise_irq(pin_irq,addr & 2 ? 1 : 0);
-    pin_irq=avr_io_getirq(swinsid_avrsim,AVR_IOCTL_IOPORT_GETIRQ('C'),2);
-    avr_raise_irq(pin_irq,addr & 4 ? 1 : 0);
-    pin_irq=avr_io_getirq(swinsid_avrsim,AVR_IOCTL_IOPORT_GETIRQ('C'),3);
-    avr_raise_irq(pin_irq,addr & 8 ? 1 : 0);
-    pin_irq=avr_io_getirq(swinsid_avrsim,AVR_IOCTL_IOPORT_GETIRQ('C'),4);
-    avr_raise_irq(pin_irq,addr & 16 ? 1 : 0);
-
-    /* Output the data on pin PD0, PD1, PC5, PD3..PD7 of the Atmega88 */
-    pin_irq=avr_io_getirq(swinsid_avrsim,AVR_IOCTL_IOPORT_GETIRQ('D'),0);
-    avr_raise_irq(pin_irq,data & 1 ? 1 : 0);
-    pin_irq=avr_io_getirq(swinsid_avrsim,AVR_IOCTL_IOPORT_GETIRQ('D'),1);
-    avr_raise_irq(pin_irq,data & 2 ? 1 : 0);
-    pin_irq=avr_io_getirq(swinsid_avrsim,AVR_IOCTL_IOPORT_GETIRQ('C'),5);
-    avr_raise_irq(pin_irq,data & 4 ? 1 : 0);
-    pin_irq=avr_io_getirq(swinsid_avrsim,AVR_IOCTL_IOPORT_GETIRQ('D'),3);
-    avr_raise_irq(pin_irq,data & 8 ? 1 : 0);
-    pin_irq=avr_io_getirq(swinsid_avrsim,AVR_IOCTL_IOPORT_GETIRQ('D'),4);
-    avr_raise_irq(pin_irq,data & 16 ? 1 : 0);
-    pin_irq=avr_io_getirq(swinsid_avrsim,AVR_IOCTL_IOPORT_GETIRQ('D'),5);
-    avr_raise_irq(pin_irq,data & 32 ? 1 : 0);
-    pin_irq=avr_io_getirq(swinsid_avrsim,AVR_IOCTL_IOPORT_GETIRQ('D'),6);
-    avr_raise_irq(pin_irq,data & 64 ? 1 : 0);
-    pin_irq=avr_io_getirq(swinsid_avrsim,AVR_IOCTL_IOPORT_GETIRQ('D'),7);
-    avr_raise_irq(pin_irq,data & 128 ? 1 : 0);
+  total_sleep += how_long;
+  if (++calls >= 500000) {
+    calls = 0;
+    printf("AVR sleeping %lu totals %lu/%lu: %lu\%\n",
+	   how_long, total_sleep, avr->cycle,
+	   (total_sleep *100) / (total_sleep + avr->cycle));
+  }
 #endif
-
-#if 1
-    /* Rather than using the irq mechanism, we can also set the state of the
-       pins by writing directly to AVR memory. By writing directly to AVR
-       memory, SimAVR cannot make any of the on-chip pheripherals to
-       react on a pin-change, however, since the SwinSID just reads the pin
-       states from memory, it is also kind of irrelevant for the SwinSID.
-
-       Since writing to AVR memory is way faster than the irq mechanism,
-       makes the simulation fast enough for realtime playback to soundcards,
-       it is the preferred method.
-     */
-    uint8_t portc = addr | ((data & 4) << 3);  /* Move D2 to PC5 */
-    uint8_t portd = data | 4;                  /* CS line on PD2 always high */
-    avr_core_watch_write(swinsid_avrsim, PINC, portc);
-    avr_core_watch_write(swinsid_avrsim, PIND, portd);
-#endif
-
-    /* Trigger a chip-select interrupt on the SwinSID.
-       The SID CS line is connected to external interrupt 0 on the Atmega88,
-       which uses interrupt vector 1. */
-    avr_raise_interrupt(swinsid_avrsim, m_int0_interrupt_vector);
 }
 
 void SwinSIDsim::clock()
 {
-    int start;
-    const event_clock_t cycles = eventScheduler->getTime(EVENT_CLOCK_PHI1) - m_accessClk;
+    event_clock_t     cycles;
+    avr_cycle_count_t avrcycles;
+
+    cycles = eventScheduler->getTime(EVENT_CLOCK_PHI1) - m_accessClk;
     m_accessClk += cycles;
-    start = m_bufferpos;
-    avr_cycle_count_t avrcycles = swinsid_avrsim->cycle;
-    for (int i=0;i<cycles;i++) {
-      avr_cycle_count_t avrcycles = swinsid_avrsim->cycle;
-      while (m_sync_avr_c64_clock<32000) {
+
+    for (int i = 0; i < cycles; i++) {
+      avrcycles = swinsid_avrsim->cycle;
+      while (m_sync_avr_c64_clock < 32000) {
         int state = avr_run(swinsid_avrsim);
         if (state == cpu_Done || state == cpu_Crashed)
           break;

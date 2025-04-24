@@ -55,20 +55,22 @@ public:
 class SwinSIDsim final : public sidemu
 {
 private:
-    elf_firmware_t &swinsid_fw;
-    avr_t *swinsid_avrsim;
-    int16_t m_sample;
-    bool m_sample_generated;
-    uint_least32_t m_sample_rate;
+    elf_firmware_t   &swinsid_fw;
+    avr_t            *swinsid_avrsim;
+    avr_irq_t        *portc_irq, *portd_irq;
+    int16_t           m_sample;
+    bool              m_sample_generated;
+    uint_least32_t    m_sample_rate;
     avr_int_vector_t *m_int0_interrupt_vector;
-    int m_sync_avr_c64_clock;
+    int               m_sync_avr_c64_clock;
 
-    static void ocr1bl_write_notify(struct avr_irq_t * irq, uint32_t value, void * param);
+    static void ocr1bl_write_notify(struct avr_irq_t * irq,
+				    uint32_t value, void * param);
 
+    void wait_for_sample(void);
 public:
     static const char* getCredits();
 
-public:
     SwinSIDsim(sidbuilder *builder, const std::string &fw_filename);
     ~SwinSIDsim();
 
@@ -87,7 +89,7 @@ public:
     void sampling(float systemclock, float freq,
         SidConfig::sampling_method_t method, bool) override;
 
-    void voice(unsigned int num, bool mute) override;
+    void voice(unsigned int num, bool mute);
 
     void model(SidConfig::sid_model_t model, bool digiboost) override;
 
